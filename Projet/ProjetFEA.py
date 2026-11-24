@@ -17,8 +17,10 @@ import numpy as np
 class ResultatTreillis:
     """Résultats intermédiaires et finaux, dans l'ordre du mini-projet.
 
-    K et F sont dans le repère global (X1, Y1, X2, Y2, …). K_red, F_red,
-    ddl_libres et q_red utilisent les axes d'appui si ceux-ci sont inclinés.
+    Les noms suivent l'énoncé (Length, Orient, N_BC_U, Row_Column_elimin,
+    K_red_inter, K_red, F_red, q_red). K et F sont dans le repère global
+    (X1, Y1, X2, Y2, …). K_red_inter, K_red, F_red et q_red utilisent les axes
+    d'appui si ceux-ci sont inclinés.
     Les déplacements et réactions sont dans le repère global, un nœud par
     ligne. Un effort normal positif correspond à une barre en traction.
     """
@@ -28,7 +30,10 @@ class ResultatTreillis:
     rigidites_elementaires: np.ndarray
     K: np.ndarray
     F: np.ndarray
+    N_BC_U: int
+    Row_Column_elimin: np.ndarray
     ddl_libres: np.ndarray
+    K_red_inter: np.ndarray
     K_red: np.ndarray
     F_red: np.ndarray
     q_red: np.ndarray
@@ -109,27 +114,60 @@ def resoudre_treillis(coord, connec, module, section=None, *, diametre=None,
         section = np.pi * diametres**2 / 4
     section = _propriete_barres(section, n_barres, "La section")
 
-    # 2. Géométrie des barres, orientées du premier au second nœud.
-    debut, fin = connec.T
-    vecteurs = coord[fin] - coord[debut]
-    longueurs = np.hypot(vecteurs[:, 0], vecteurs[:, 1])
-    if np.any(longueurs == 0) or not np.all(np.isfinite(longueurs)):
-        raise ValueError("Chaque barre doit avoir une longueur finie et strictement positive.")
-    orientations = np.arctan2(vecteurs[:, 1], vecteurs[:, 0])
-    directions = vecteurs / longueurs[:, None]
+    # Notations de l'énoncé. Attention : en Python les nœuds et les barres sont
+    # numérotés à partir de 0 (A = 0, B = 1, ...), l'énoncé part de 1.
+    Nn = n_noeuds
+    Nr = n_barres
 
-    # 3. Rigidités élémentaires et assemblage. b @ q_e est l'allongement.
-    projections = np.column_stack((-directions, directions))
-    rigidites_axiales = module * section / longueurs
-    rigidites_elementaires = np.empty((n_barres, 4, 4))
-    n_ddl = 2 * n_noeuds
-    K = np.zeros((n_ddl, n_ddl))
-    ddl_barres = np.column_stack((2 * debut, 2 * debut + 1, 2 * fin, 2 * fin + 1))
-    for i, (ddl, b) in enumerate(zip(ddl_barres, projections)):
-        # K_e = (ES/L) bᵀ b, avec b = [-c, -s, c, s].
-        ke = rigidites_axiales[i] * np.outer(b, b)
-        rigidites_elementaires[i] = ke
-        K[np.ix_(ddl, ddl)] += ke
+    # 2. Length[i] et Orient[i] de chaque barre, à partir des coordonnées.
+    #    La barre i va du nœud connec[i][0] vers le nœud connec[i][1].
+    Length = np.zeros(Nr)
+    Orient = np.zeros(Nr)
+    cos_orient = np.zeros(Nr)
+    sin_orient = np.zeros(Nr)
+    for i in range(Nr):
+        n1 = connec[i][0]
+        n2 = connec[i][1]
+        dX = coord[n2][0] - coord[n1][0]
+        dY = coord[n2][1] - coord[n1][1]
+        Length[i] = np.sqrt(dX**2 + dY**2)
+        if not Length[i] > 0 or not np.isfinite(Length[i]):
+            raise ValueError("Chaque barre doit avoir une longueur finie et strictement positive.")
+        # arctan2 tient compte des signes de dX et dY, donc donne le bon quadrant.
+        Orient[i] = np.arctan2(dY, dX)
+        # cos(Orient) = dX/L et sin(Orient) = dY/L. On les garde sous cette forme
+        # pour avoir des zéros exacts (cos(π/2) vaut 6e-17 en machine, pas 0).
+        cos_orient[i] = dX / Length[i]
+        sin_orient[i] = dY / Length[i]
+
+    # 3. Matrices de rigidité élémentaires Ke et assemblage dans K (2Nn × 2Nn).
+    #    Numérotation des DDL : le DDL X du nœud n est 2n, le DDL Y est 2n + 1
+    #    (dans l'énoncé, avec des indices à partir de 1 : 2n - 1 et 2n).
+    K = np.zeros((2 * Nn, 2 * Nn))
+    rigidites_elementaires = np.zeros((Nr, 4, 4))
+    for i in range(Nr):
+        c = cos_orient[i]
+        s = sin_orient[i]
+        Ke = module[i] * section[i] / Length[i] * np.array([
+            [ c * c,  c * s, -c * c, -c * s],
+            [ c * s,  s * s, -c * s, -s * s],
+            [-c * c, -c * s,  c * c,  c * s],
+            [-c * s, -s * s,  c * s,  s * s],
+        ])
+        rigidites_elementaires[i] = Ke
+
+        # Assemblage : boucle sur les 2 nœuds j et k de la barre i.
+        # Énoncé : K[2·connec[i][j]-1][2·connec[i][k]-1] += Ke[2j-1][2k-1], etc.
+        # Avec des indices Python (à partir de 0), le "-1" disparaît côté X
+        # et devient "+1" côté Y.
+        for j in range(2):
+            for k in range(2):
+                nj = connec[i][j]
+                nk = connec[i][k]
+                K[2 * nj][2 * nk] += Ke[2 * j][2 * k]                  # X_j, X_k
+                K[2 * nj + 1][2 * nk] += Ke[2 * j + 1][2 * k]          # Y_j, X_k
+                K[2 * nj][2 * nk + 1] += Ke[2 * j][2 * k + 1]          # X_j, Y_k
+                K[2 * nj + 1][2 * nk + 1] += Ke[2 * j + 1][2 * k + 1]  # Y_j, Y_k
 
     # 4. Conditions aux limites et réduction du système.
     if (bc_u is None) == (liaisons is None):
@@ -143,21 +181,55 @@ def resoudre_treillis(coord, connec, module, section=None, *, diametre=None,
             bc_u = [types[liaison] for liaison in liaisons]
         except KeyError as erreur:
             raise ValueError(f"Liaison inconnue {erreur}. Choisir parmi {', '.join(types)}.") from erreur
-    imposes = _masque(bc_u, forme_nodale, "bc_u").ravel()
-    ddl_libres = np.flatnonzero(~imposes)
-    u_imposes = np.zeros(n_ddl)
-    if val_u is not None:
-        u_imposes = _tableau(val_u, forme_nodale, "val_u").ravel()
-    forces = np.zeros(forme_nodale) if val_f is None else _tableau(val_f, forme_nodale, "val_f")
-    if bc_f is not None:
-        forces = np.where(_masque(bc_f, forme_nodale, "bc_f"), forces, 0.0)
-    F = forces.flatten()
+    # 4.a Tableaux de l'énoncé, de taille Nn.
+    #     BC_Ux[i] = 1 si Ux est imposé au nœud i, 0 sinon (idem Uy, Fx, Fy).
+    #     VAL_Ux[i] = valeur de Ux au nœud i si BC_Ux[i] = 1 (idem Uy, Fx, Fy).
+    bc_u = _masque(bc_u, forme_nodale, "bc_u").astype(int)
+    BC_Ux = bc_u[:, 0]
+    BC_Uy = bc_u[:, 1]
+    val_u = np.zeros(forme_nodale) if val_u is None else _tableau(val_u, forme_nodale, "val_u")
+    VAL_Ux = val_u[:, 0]
+    VAL_Uy = val_u[:, 1]
+    # Par défaut, toutes les forces données dans val_f sont appliquées.
+    bc_f = np.ones(forme_nodale, dtype=int) if bc_f is None else _masque(bc_f, forme_nodale, "bc_f").astype(int)
+    BC_Fx = bc_f[:, 0]
+    BC_Fy = bc_f[:, 1]
+    val_f = np.zeros(forme_nodale) if val_f is None else _tableau(val_f, forme_nodale, "val_f")
+    VAL_Fx = val_f[:, 0]
+    VAL_Fy = val_f[:, 1]
 
+    # 4.b Nombre de conditions cinématiques.
+    N_BC_U = int(np.sum(BC_Ux + BC_Uy))
+
+    # 4.c Lignes et colonnes à éliminer (1 = DDL imposé).
+    Row_Column_elimin = np.zeros(2 * Nn, dtype=int)
+    for i in range(Nn):
+        if BC_Ux[i] == 1:
+            Row_Column_elimin[2 * i] = 1
+        if BC_Uy[i] == 1:
+            Row_Column_elimin[2 * i + 1] = 1
+
+    # 4.d Vecteur des forces nodales F (2Nn) et des déplacements imposés U_imp (2Nn).
+    F = np.zeros(2 * Nn)
+    U_imp = np.zeros(2 * Nn)
+    for i in range(Nn):
+        if BC_Fx[i] == 1:
+            F[2 * i] = VAL_Fx[i]
+        if BC_Fy[i] == 1:
+            F[2 * i + 1] = VAL_Fy[i]
+        if BC_Ux[i] == 1:
+            U_imp[2 * i] = VAL_Ux[i]
+        if BC_Uy[i] == 1:
+            U_imp[2 * i + 1] = VAL_Uy[i]
+
+    # Extension (hors énoncé) : appuis inclinés, comme l'exercice 2 du TD4.
+    # On exprime K et F dans les axes locaux des appuis : K' = Tᵀ K T, F' = Tᵀ F.
+    # Sans appui incliné, K_appuis = K et F_appuis = F (cas de l'énoncé).
     K_appuis, F_appuis = K, F
     changement_base = None
     if angles_appuis is not None:
-        angles = _tableau(angles_appuis, (n_noeuds,), "angles_appuis")
-        changement_base = np.eye(n_ddl)
+        angles = _tableau(angles_appuis, (Nn,), "angles_appuis")
+        changement_base = np.eye(2 * Nn)
         for noeud, angle in enumerate(angles):
             c, s = np.cos(angle), np.sin(angle)
             ddl = slice(2 * noeud, 2 * noeud + 2)
@@ -166,34 +238,86 @@ def resoudre_treillis(coord, connec, module, section=None, *, diametre=None,
         K_appuis = changement_base.T @ K @ changement_base
         F_appuis = changement_base.T @ F
 
-    K_red = K_appuis[np.ix_(ddl_libres, ddl_libres)]
-    K_libres_imposes = K_appuis[np.ix_(ddl_libres, np.flatnonzero(imposes))]
-    F_red = F_appuis[ddl_libres] - K_libres_imposes @ u_imposes[imposes]
+    # 4.e Matrice intermédiaire K_red_inter (2Nn - N_BC_U) × 2Nn :
+    #     on garde seulement les lignes de K des DDL non imposés.
+    K_red_inter = np.zeros((2 * Nn - N_BC_U, 2 * Nn))
+    k = 0
+    for i in range(2 * Nn):
+        if Row_Column_elimin[i] == 0:
+            for j in range(2 * Nn):
+                K_red_inter[k][j] = K_appuis[i][j]
+            k = k + 1
 
-    # 5. Résolution, puis restitution des déplacements complets.
-    q = np.zeros(n_ddl)
-    q[imposes] = u_imposes[imposes]
-    if len(ddl_libres):
+    # 4.f Matrice réduite K_red (2Nn - N_BC_U) × (2Nn - N_BC_U) :
+    #     on garde seulement les colonnes de K_red_inter des DDL non imposés.
+    K_red = np.zeros((2 * Nn - N_BC_U, 2 * Nn - N_BC_U))
+    k = 0
+    for j in range(2 * Nn):
+        if Row_Column_elimin[j] == 0:
+            for i in range(2 * Nn - N_BC_U):
+                K_red[i][k] = K_red_inter[i][j]
+            k = k + 1
+
+    # 4.g Vecteur des forces réduites F_red, même procédure que K_red_inter.
+    #     Ajout par rapport à l'énoncé : un déplacement imposé non nul U_imp[j]
+    #     crée l'effort K[i][j]·U_imp[j], qu'on passe dans le second membre.
+    #     Dans le cas de l'énoncé, U_imp = 0 et ce terme est nul.
+    F_red = np.zeros(2 * Nn - N_BC_U)
+    k = 0
+    for i in range(2 * Nn):
+        if Row_Column_elimin[i] == 0:
+            F_red[k] = F_appuis[i]
+            for j in range(2 * Nn):
+                if Row_Column_elimin[j] == 1:
+                    F_red[k] = F_red[k] - K_appuis[i][j] * U_imp[j]
+            k = k + 1
+
+    # 5. Résolution de [K_red]{q_red} = {F_red}.
+    q_red = np.zeros(2 * Nn - N_BC_U)
+    if 2 * Nn - N_BC_U > 0:
         message = "Rigidité réduite numériquement singulière. Vérifier les appuis et les mécanismes."
-        if np.linalg.matrix_rank(K_red) < len(ddl_libres):
+        if np.linalg.matrix_rank(K_red) < 2 * Nn - N_BC_U:
             raise ValueError(message)
         try:
-            q[ddl_libres] = np.linalg.solve(K_red, F_red)
+            q_red = np.linalg.solve(K_red, F_red)
         except np.linalg.LinAlgError as erreur:
             raise ValueError(message) from erreur
-    q_red = q[ddl_libres]
-    if changement_base is not None:
-        q = changement_base @ q
 
-    # 6. Réactions et efforts, à partir de la solution complète.
+    # Vecteur complet q (2Nn) : q_red sur les DDL libres, U_imp sur les DDL imposés.
+    q = np.zeros(2 * Nn)
+    k = 0
+    for i in range(2 * Nn):
+        if Row_Column_elimin[i] == 0:
+            q[i] = q_red[k]
+            k = k + 1
+        else:
+            q[i] = U_imp[i]
+    if changement_base is not None:
+        q = changement_base @ q  # retour au repère global
+
+    # 6. Post-traitement (hors énoncé) : réactions R = K q - F, puis efforts.
     reactions = K @ q - F
-    allongements = np.sum(projections * q[ddl_barres], axis=1)
-    deformations = allongements / longueurs
-    contraintes = module * deformations
+    deformations = np.zeros(Nr)
+    for i in range(Nr):
+        n1 = connec[i][0]
+        n2 = connec[i][1]
+        # Allongement = déplacement relatif projeté sur l'axe de la barre.
+        allongement = (cos_orient[i] * (q[2 * n2] - q[2 * n1])
+                       + sin_orient[i] * (q[2 * n2 + 1] - q[2 * n1 + 1]))
+        deformations[i] = allongement / Length[i]
+    contraintes = module * deformations  # σ = E ε
+    efforts_normaux = section * contraintes  # N = σ S, positif en traction
+
     return ResultatTreillis(
-        longueurs, orientations, rigidites_elementaires, K, F, ddl_libres,
-        K_red, F_red, q_red, q.reshape(forme_nodale), reactions.reshape(forme_nodale),
-        deformations, contraintes, section * contraintes, section.copy(),
+        longueurs=Length, orientations=Orient,
+        rigidites_elementaires=rigidites_elementaires, K=K, F=F,
+        N_BC_U=N_BC_U, Row_Column_elimin=Row_Column_elimin,
+        ddl_libres=np.flatnonzero(Row_Column_elimin == 0),
+        K_red_inter=K_red_inter, K_red=K_red, F_red=F_red, q_red=q_red,
+        deplacements=q.reshape(forme_nodale),
+        reactions=reactions.reshape(forme_nodale),
+        deformations=deformations, contraintes=contraintes,
+        efforts_normaux=efforts_normaux, sections=section.copy(),
     )
 
 
@@ -281,12 +405,18 @@ def _afficher_details(donnees, resultat, noms_noeuds, noms_barres):
                  for i in (2 * noeud, 2 * noeud + 1)]
         print(f"{nom:<14}{etats[0]:>18}{etats[1]:>18}")
 
+    print(f"\n   N_BC_U = {resultat.N_BC_U} (nombre de déplacements imposés)")
+    print("\n   Row_Column_elimin (1 = ligne et colonne à éliminer)")
+    for nom, valeur in zip(noms_ddl, resultat.Row_Column_elimin):
+        print(f"   {nom:<14}{valeur:>4}")
+
     inconnues = [noms_ddl[i] for i in resultat.ddl_libres]
     print(f"\n   Déplacements à résoudre ({len(inconnues)} sur {2 * n_noeuds}) "
           f"{', '.join(inconnues) or 'aucun'}.")
     print("   Les déplacements imposés sont connus. Les réactions sont calculées ensuite.")
     if inconnues:
-        _afficher_rigidite("   Matrice réduite K_red", resultat.K_red)
+        _afficher_rigidite("   K_red_inter : lignes des DDL libres", resultat.K_red_inter)
+        _afficher_rigidite("   K_red : colonnes des DDL libres", resultat.K_red)
         print("\n   Second membre F_red (N)")
         for nom, force in zip(inconnues, resultat.F_red):
             print(f"   {nom:<14}{force:14.6g}")
