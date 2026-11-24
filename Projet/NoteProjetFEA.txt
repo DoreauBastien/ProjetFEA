@@ -1,0 +1,22 @@
+Note à connaitre pour le rendu en classe 
+
+Pour avoir les étapes de calculs plus précises que les simple résultats finaux : 
+    python -u "/Users/bastiendoreau/Desktop/A4/S1/Finite element analysis/ProjetFEAGithub/Projet/ProjetFEA.py" --details
+
+Dans les détails: 
+    1) Coord(m) donne la positions de chaque points (dans l'ordre)
+       Connec indique les extrémités de chaque barre en fonction des neuds (ils sont numérotés). A=0 ; B=1 ...  donc la première barre fait [0 1] de A à B 
+       On a le module d'Young et la section. 
+
+    2) Longueur et angles 
+    
+    3) Matrices de rigidité par barre puis matrice de rigidité globale. 
+
+    4) Blocage des déplacements [0 0] déplacement autorisé (A dans l'exemple), [1 1] aucun déplacement.
+       Forces nodales
+       Matrice de rigidité réduite
+    
+    5) Déplacement
+
+Pour utilisé un nouveau cas avec de nouvelles conditions:
+    
