@@ -2,7 +2,6 @@
 
 import json
 import unittest
-from pathlib import Path
 
 import numpy as np
 from numpy.testing import assert_allclose, assert_array_equal
@@ -46,8 +45,15 @@ class TestTreillis(unittest.TestCase):
         self.assertAlmostEqual(np.sum(x * bilan[:, 1] - y * bilan[:, 0]), 0)
 
     def test_treillis_json_diametres_et_liaisons(self):
-        chemin = Path(__file__).with_name("exemple_treillis.json")
-        donnees = json.loads(chemin.read_text(encoding="utf-8"))
+        # Ce triangle de référence reste fixe pendant les essais avec --cas.
+        donnees = json.loads("""{
+            "coord": [[0, 0], [2, 0], [1, 1]],
+            "connec": [[0, 1], [0, 2], [1, 2]],
+            "module": 210000000000,
+            "diametre": [0.016, 0.012, 0.010],
+            "liaisons": ["bloque", "libre_x", "libre"],
+            "val_f": [[0, 0], [0, 0], [0, -1000]]
+        }""")
         resultat = resoudre_treillis(**donnees)
 
         # L'équilibre aux nœuds donne une traction P/2 dans la base et une

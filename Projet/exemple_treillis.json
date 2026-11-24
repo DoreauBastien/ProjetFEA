@@ -1,8 +1,8 @@
 {
-  "coord": [[0, 0], [2, 0], [1, 1]],    // Coordonnées des nœuds
-  "connec": [[0, 1], [0, 2], [1, 2]],    // Connexions des barres
-  "module": 210000000000,               // Module d'Young
-  "diametre": [0.016, 0.012, 0.010],    // Diamètres des barres en m
-  "liaisons": ["bloque", "libre_x", "libre"], // Liaisons aux appuis (bloque = déplacement nul, libre_x = déplacement libre en x, libre = déplacement libre en x et y)
-  "val_f": [[0, 0], [0, 0], [0, -1000]] // Forces nodales en N
+  "coord": [[0, 0], [3, 0], [3, 2],[0, 2]],    
+  "connec": [[0, 1], [0, 2],[0, 3],[1, 2],[2,3]],   
+  "module": 210000000000,             
+  "diametre": [0.020, 0.018, 0.012, 0.016, 0.014],   
+  "liaisons": ["bloque", "libre", "libre", "libre_y"], 
+  "val_f": [[0, 0], [600, -800], [0, -1000], [0, -1000]] 
 }
