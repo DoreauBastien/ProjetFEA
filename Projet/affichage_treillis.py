@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, FuncFormatter
 import numpy as np
 
-from ProjetFEA import donnees_mini_projet, resoudre_treillis
+from solveur_treillis import donnees_mini_projet, resoudre_treillis
 
 # (Ux imposé, Uy imposé) -> (nom dans la légende, couleur)
 LIAISONS = {
