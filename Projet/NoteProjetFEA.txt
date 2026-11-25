@@ -1,5 +1,7 @@
 Note à connaitre pour le rendu en classe 
 
+Si l'on ne lance pas via le --cas, le code choisit de base les données de l'exemple du projet. 
+
 Pour avoir les étapes de calculs plus précises que les simple résultats finaux : 
     python -u "/Users/bastiendoreau/Desktop/A4/S1/Finite element analysis/ProjetFEAGithub/Projet/ProjetFEA.py" --details
 
@@ -18,5 +20,16 @@ Dans les détails:
     
     5) Déplacement
 
-Pour utilisé un nouveau cas avec de nouvelles conditions:
-    
+Comment remplir le json : (json accepte pas les commentaires)
+
+{
+  "coord": [[0, 0], [3, 0], [3, 2],[0, 2]],    // Coordonnées des nœuds
+  "connec": [[0, 1], [0, 2],[0, 3],[1, 2],[2,3]],    // Connexions des barres
+  "module": 210000000000,               // Module d'Young
+  "diametre": [0.020, 0.018, 0.012, 0.016, 0.014],    // Diamètres des barres en m
+  "liaisons": ["bloque", "libre", "libre", "libre_y"], // Liaisons aux appuis (bloque = déplacement nul, libre_x = déplacement libre en x, libre = déplacement libre en x et y)
+  "val_f": [[0, 0], [600, -800], [0, -1000], [0, -1000]] // Forces nodales en N
+}
+
+Lancer le test du cas particulier: 
+cd "/Users/bastiendoreau/Desktop/A4/S1/Finite element analysis/ProjetFEAGithub/Projet" python ProjetFEA.py --cas exemple_treillis.json --details
